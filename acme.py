@@ -97,7 +97,7 @@ def update_contact(contact_id):
     return jsonify(record), 200
 
 @acme_bp.route("/v1/acme/contacts/<contact_id>", methods=["GET"])
-@limiter.limit("20 per minute")
+@limiter.limit("10 per minute")
 @token_required
 def get_contact(contact_id):
     contact = db_get(contact_id)
@@ -108,7 +108,7 @@ def get_contact(contact_id):
     return jsonify(contact), 200
 
 @acme_bp.route("/v1/acme/contacts/<contact_id>", methods=["DELETE"])
-@limiter.limit("5 per minute")
+@limiter.limit("10 per minute")
 @token_required
 def delete_contact(contact_id):
     deleted = db_delete(contact_id)
