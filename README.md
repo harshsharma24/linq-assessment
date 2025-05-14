@@ -81,7 +81,7 @@ This API handles field name translation between your application and ACME's syst
 The API includes comprehensive test coverage for all CRUD operations:
 
 ```bash
-pytest test_integration.py -v
+pytest --maxfail=1 --disable-warnings -q
 ```
 
 Test suite includes:
