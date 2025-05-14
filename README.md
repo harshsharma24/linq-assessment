@@ -92,8 +92,6 @@ Test suite includes:
 * Contact deletion tests
 * Error handling tests
 
-## Design & Architecture
-
 ## Trade‑Offs
 
 * **In-Memory Queue:** Used a Python `queue.Queue` for fast MVP development and zero external dependencies, at the cost of no persistence across restarts.
@@ -165,32 +163,6 @@ A Postman collection is included for manual testing:
 
 * Import **Linq Assessment.postman\_collection.json** into Postman
 * Use the collection to test all API endpoints
-
-## Design & Architecture
-
-* **Modular Design**
-
-  * **API Layer (`integration.py`)**: Exposes RESTful endpoints and handles HTTP requests/responses
-  * **Client Layer (`acme_client.py`)**: Manages communication with the ACME CRM API
-  * **Mock ACME API (`acme.py`)**: Simulates the ACME CRM system for testing
-  * **Database Layer (`mock_db.py`)**: Provides data storage and retrieval functions
-
-* **Field Mapping**
-
-  * Transparent translation between your application's field names and ACME's field names
-  * Mapping is handled in the integration layer, shielding clients from ACME's specific naming requirements
-
-* **Error Handling**
-
-  * Proper HTTP status codes (`200`, `201`, `204`, `400`, `404`, `500`)
-  * Meaningful error messages to help clients understand issues
-  * Exception handling to prevent internal errors from reaching clients
-
-* **In-Memory Database**
-
-  * Dictionary-based storage for demonstration and testing
-  * UUID-based identifiers for contacts
-  * Clean interface that mimics a real database for easy future migration
 
 ## Future Improvements
 
