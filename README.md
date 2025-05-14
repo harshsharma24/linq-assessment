@@ -140,8 +140,8 @@ This pattern ensures your front‑end or calling code never has to know about Ac
 * We use `flask-limiter` to simulate realistic API quotas on the mock CRM:
 
   * **10 req/min** for create/update
-  * **20 req/min** for reads
-  * **5 req/min** for deletes
+  * **10 req/min** for reads
+  * **10 req/min** for deletes
 * Each rate‑limited endpoint returns 429 with a `Retry-After` header. Your client’s back‑off logic reads this and respects the wait time.
 
 This demonstrates how your integration code would behave under real API constraints.
