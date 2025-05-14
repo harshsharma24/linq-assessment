@@ -16,8 +16,8 @@ This API serves as a bridge between your application and the ACME contact manage
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/your-username/contact-management-api.git
-   cd contact-management-api
+   git clone https://github.com/harshsharma24/linq-assessment.git
+ 
    ```
 
 2. **Create and activate a virtual environment**
@@ -39,10 +39,10 @@ This API serves as a bridge between your application and the ACME contact manage
 Start the Flask server:
 
 ```bash
-python app.py
+flask run
 ```
 
-The API will be accessible at `http://localhost:5000` by default.
+The API will be accessible at `http://127.0.0.1:5000` by default.
 
 ## API Endpoints
 
@@ -94,60 +94,165 @@ Test suite includes:
 
 ## Design & Architecture
 
-* **Modular Design**: Separates database operations from API endpoints
-* **Field Mapping**: Transparent translation between your field names and ACME's
-* **Error Handling**: Proper HTTP status codes and meaningful error messages
-* **In-Memory Database**: Uses a simple dictionary-based store for demonstration purposes
+## Trade‑Offs
+
+* **In-Memory Queue:** Used a Python `queue.Queue` for fast MVP development and zero external dependencies, at the cost of no persistence across restarts.
+* **In-Memory DB (Hash Map):** Contacts are stored in a simple dict for quick prototyping; data resets on service restart.
+* **Mocked ACME Responses:** The ACME backend is fully mocked, enabling local development and controlled testing, but lacking real-world API semantics and error rates.
+
+## Design & Architecture
+
+Below are the core architectural choices, why they were made, and how they work together:
+
+### 1. Modular Design & Blueprint Separation
+
+* **`acme.py` + `mock_db.py`** implement your *mock CRM* as a self‑contained Flask Blueprint. All HTTP routes, JWT logic, rate‑limiter and webhook dispatch live here.
+* **`acme_client.py`** encapsulates *all* downstream communication: token refresh, timeouts, and retry/back‑off. Your Flask handlers never call `requests` directly—they just call `AcmeClient` methods.
+* **`integration.py`** exposes your own client‑facing CRUD under `/api/contacts`, mapping fields and translating errors into clean JSON responses.
+
+By isolating these layers, you can:
+
+1. **Swap** any one component (e.g., replace the in‑memory queue with Celery) without touching the others.
+2. **Test** each piece in isolation (unit tests on `AcmeClient`, integration tests on your Flask endpoints).
+3. **Read** and reason about each responsibility without wading through unrelated code.
+
+### 2. Field Mapping & Data Normalization
+
+* Internal model: `{ firstName, lastName, email }`
+* Acme CRM model: `{ acme_first_name, acme_last_name, acme_email }`
+
+Two simple helper functions (`map_to_acme`, `map_from_acme`) handle this translation:
+
+1. **Forward mapping** converts your payload into Acme’s schema for all outbound calls.
+2. **Backward mapping** converts CRM responses back into your normalized interface.
+
+This pattern ensures your front‑end or calling code never has to know about Acme’s naming conventions, and makes it easy to add more fields or support additional CRMs in the future.
+
+### 3. Resiliency & Error Handling
+
+* **Timeouts**: Every HTTP request has a strict 5s timeout, preventing your service from hanging on slow dependencies.
+* **Automatic JWT Refresh**: `AcmeClient` caches tokens and refreshes them 60s before expiry, so you never get caught with an expired token in mid‑flow.
+* **Exponential Back‑Off Retries**: On 429 (rate limit) or any 5xx error, Tenacity retries with delays of 6s → 12s → 24s → 48s (capped at 60s), up to 5 attempts. This smooths spikes and gracefully recovers from transient outages.
+* **HTTP Status Codes**: The Flask handlers map errors to the correct status: 401 for auth, 404 for missing resources, 429 for rate limits, and 502 for upstream failures in the integration layer.
+
+### 4. Rate Limiting Simulation
+
+* We use `flask-limiter` to simulate realistic API quotas on the mock CRM:
+
+  * **10 req/min** for create/update
+  * **20 req/min** for reads
+  * **5 req/min** for deletes
+* Each rate‑limited endpoint returns 429 with a `Retry-After` header. Your client’s back‑off logic reads this and respects the wait time.
+
+This demonstrates how your integration code would behave under real API constraints.
+
+### 5. Asynchronous Webhooks & Queueing
+
+* **Dispatch**: Outbound webhooks fire-and-forget via daemon threads, so your create/update HTTP response never blocks on network I/O.
+* **Ingestion**: Received webhooks land in an in‑memory `queue.Queue`, and a dedicated background thread (`process_webhook_queue`) pulls items off for downstream processing.
+
+This decoupling ensures smooth, non‑blocking flows and lays the groundwork for swapping in a durable broker (e.g., RabbitMQ, AWS SQS) or Celery workers.
+
+### 6. In-Memory Data Store
+
+* We use a simple Python dictionary (`STORE`) in `mock_db.py` for both the mock CRM and for stubbing in tests.
+* **Benefits**: zero external dependencies, instant startup, and easy inspection.
+* **Trade‑off**: data is lost on process restart. For production, you’d replace this with a real database (PostgreSQL, DynamoDB, etc.).
+
+## Postman Collection
+
+A Postman collection is included for manual testing:
+
+* Import **Linq Assessment.postman\_collection.json** into Postman
+* Use the collection to test all API endpoints
+
+## Design & Architecture
+
+* **Modular Design**
+
+  * **API Layer (`integration.py`)**: Exposes RESTful endpoints and handles HTTP requests/responses
+  * **Client Layer (`acme_client.py`)**: Manages communication with the ACME CRM API
+  * **Mock ACME API (`acme.py`)**: Simulates the ACME CRM system for testing
+  * **Database Layer (`mock_db.py`)**: Provides data storage and retrieval functions
+
+* **Field Mapping**
+
+  * Transparent translation between your application's field names and ACME's field names
+  * Mapping is handled in the integration layer, shielding clients from ACME's specific naming requirements
+
+* **Error Handling**
+
+  * Proper HTTP status codes (`200`, `201`, `204`, `400`, `404`, `500`)
+  * Meaningful error messages to help clients understand issues
+  * Exception handling to prevent internal errors from reaching clients
+
+* **In-Memory Database**
+
+  * Dictionary-based storage for demonstration and testing
+  * UUID-based identifiers for contacts
+  * Clean interface that mimics a real database for easy future migration
 
 ## Future Improvements
 
-* Replace in-memory store with a persistent database
-* Add pagination for listing contacts
-* Implement filtering and sorting capabilities
-* Add authentication and authorization
-* Create OpenAPI/Swagger documentation
-* Add logging and monitoring
-* Containerize with Docker for easier deployment
+* **Message Queuing System**: Implement ActiveMQ, RabbitMQ, or AWS SQS to:
 
-## Project Structure
+  * Ensure reliable message delivery between components
+  * Provide fault tolerance for system outages
+  * Enable asynchronous processing of requests
+  * Support horizontal scaling of workers
 
-```
-.
-├── app.py              # Main application entry point
-├── db.py               # Database operations
-├── requirements.txt    # Project dependencies
-├── test_integration.py # Integration tests
-└── README.md           # This documentation
-```
+* **Pagination for List Endpoints**:
 
-## API Usage Examples
+  * Add `limit` and `offset` parameters to GET endpoints
+  * Implement cursor-based pagination for better performance with large datasets
+  * Include metadata in responses (total count, next/previous links)
+  * Allow customizable page sizes
 
-### Create a Contact
+* **Caching Layer**:
+
+  * Implement Redis or Memcached for high-performance caching
+  * Cache frequently accessed contacts to reduce database load
+  * Add cache invalidation strategies for data consistency
+  * Support configurable TTL (Time-To-Live) for cached items
+
+* **Containerization**:
+
+  * Create Docker images for consistent deployment
+  * Develop `docker-compose` setup for local development
+  * Design Kubernetes manifests for production deployment
+  * Implement health checks and container orchestration
+
+* **Persistent Database**:
+
+  * Replace in-memory store with PostgreSQL or MongoDB
+  * Implement proper database migration strategy
+  * Add connection pooling for performance optimization
+  * Design appropriate indexes for query optimization
+
+* **Enhanced Logging and Monitoring**:
+
+  * Implement structured logging (JSON format)
+  * Add request tracing with unique correlation IDs
+  * Set up Prometheus metrics for performance monitoring
+  * Create Grafana dashboards for visualization
+  * Configure alerting for critical errors and performance issues
+
+* **OpenAPI Documentation**:
+
+  * Generate Swagger/OpenAPI specification
+  * Implement interactive documentation UI
+  * Include example requests and responses
+  * Document error codes and handling
+  * Provide SDK generation capabilities
+
+## Repository
+
+* GitHub: [https://github.com/harshsharma24/linq-assessment.git]
+
+## Testing
+
+Run all tests with:
 
 ```bash
-curl -X POST http://localhost:5000/api/contacts \
-     -H "Content-Type: application/json" \
-     -d '{"firstName":"Alice","lastName":"Smith","email":"alice@example.com"}'
+pytest --maxfail=1 --disable-warnings -q
 ```
-
-### Get a Contact
-
-```bash
-curl -X GET http://localhost:5000/api/contacts/1
-```
-
-### Update a Contact
-
-```bash
-curl -X PUT http://localhost:5000/api/contacts/1 \
-     -H "Content-Type: application/json" \
-     -d '{"firstName":"Alice","lastName":"Johnson","email":"alice.johnson@example.com"}'
-```
-
-### Delete a Contact
-
-```bash
-curl -X DELETE http://localhost:5000/api/contacts/1
-```
-
----
